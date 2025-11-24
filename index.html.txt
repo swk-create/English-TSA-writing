@@ -1,498 +1,739 @@
-
-import React, { useState, useCallback } from 'react';
-import { AppState, StoryScenario, PanelData, FeedbackData, DifficultyLevel, SavedSession } from './types';
-import * as GeminiService from './services/geminiService';
-import * as StorageService from './services/storageService';
-import Panel from './components/Panel';
-import WritingArea from './components/WritingArea';
-import { AlertCircle, BookOpen, CheckCircle, RefreshCw, GraduationCap, Save, History as HistoryIcon, Trash2, X, AlignLeft, Sparkles, Target, PenTool, ClipboardCheck } from 'lucide-react';
-
-const App: React.FC = () => {
-  const [appState, setAppState] = useState<AppState>(AppState.IDLE);
-  const [difficulty, setDifficulty] = useState<DifficultyLevel>('P3');
-  const [scenario, setScenario] = useState<StoryScenario | null>(null);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
-  const [studentText, setStudentText] = useState('');
-  const [feedback, setFeedback] = useState<FeedbackData | null>(null);
-  const [showMysteryEnding, setShowMysteryEnding] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  
-  // History/Session State
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
-
-  const handleGenerate = useCallback(async () => {
-    try {
-      setAppState(AppState.GENERATING_SCENARIO);
-      setError(null);
-      setScenario(null);
-      setGeneratedImages([]);
-      setStudentText('');
-      setFeedback(null);
-      setCurrentSessionId(null); // Reset session ID for new generation
-
-      // 1. Generate Text Scenario with selected difficulty
-      const newScenario = await GeminiService.generateScenario(difficulty);
-      setScenario(newScenario);
-
-      // 2. Generate Images
-      setAppState(AppState.GENERATING_IMAGES);
-      
-      // Generate images in parallel for speed
-      const imagePromises = newScenario.panels.map((panel) => 
-        GeminiService.generatePanelImage(panel.description)
-      );
-
-      const images = await Promise.all(imagePromises);
-      setGeneratedImages(images);
-      
-      setAppState(AppState.READY);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Something went wrong generating the comic.");
-      setAppState(AppState.IDLE);
-    }
-  }, [difficulty]);
-
-  const handleGrade = useCallback(async () => {
-    if (!scenario) return;
-    try {
-      setAppState(AppState.GRADING);
-      const result = await GeminiService.gradeStory(studentText, scenario);
-      setFeedback(result);
-      setAppState(AppState.READY);
-    } catch (err: any) {
-      setError("Failed to grade the story. Please try again.");
-      setAppState(AppState.READY);
-    }
-  }, [studentText, scenario]);
-
-  const handleSave = async () => {
-    if (!scenario) return;
-    try {
-      const savedId = await StorageService.saveSession({
-        scenario,
-        generatedImages,
-        studentText,
-        feedback,
-        difficulty
-      }, currentSessionId || undefined);
-      
-      setCurrentSessionId(savedId); // Update current ID to ensure future saves update this record
-      alert("Story saved to history!");
-    } catch (e) {
-      console.error(e);
-      alert("Failed to save story. Please try again.");
-    }
-  };
-
-  const openHistory = async () => {
-    try {
-      const sessions = await StorageService.getSessions();
-      setSavedSessions(sessions);
-      setShowHistory(true);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to load history.");
-    }
-  };
-
-  const loadSession = (session: SavedSession) => {
-    setScenario(session.scenario);
-    setGeneratedImages(session.generatedImages);
-    setStudentText(session.studentText);
-    setFeedback(session.feedback);
-    setDifficulty(session.difficulty);
-    setCurrentSessionId(session.id); // Set the current ID so saving updates this session
-    setAppState(AppState.READY);
-    setShowHistory(false);
-    setShowMysteryEnding(true); // Reset mystery ending view on load
-  };
-
-  const deleteSession = async (id: string) => {
-    try {
-      await StorageService.deleteSession(id);
-      setSavedSessions(prev => prev.filter(s => s.id !== id));
-      if (id === currentSessionId) {
-        setCurrentSessionId(null);
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StoryStrip AI - English Writing Practice</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Babel Standalone for JSX support -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Noto+Serif:wght@400;700&display=swap');
+      body {
+        background-color: #f3f4f6;
       }
-    } catch (e) {
-      console.error(e);
-      alert("Failed to delete story.");
-    }
-  };
+      .paper-shadow {
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-fadeIn {
+        animation: fadeIn 0.5s ease-out forwards;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
 
-  // Helper to get specific panel data safely
-  const getPanelData = (index: number): PanelData | undefined => {
-    return scenario?.panels[index];
-  };
+    <!-- Main Application Script -->
+    <script type="text/babel" data-type="module">
+      import React, { useState, useCallback, useEffect } from 'https://esm.sh/react@19.0.0';
+      import ReactDOM from 'https://esm.sh/react-dom@19.0.0/client';
+      import { GoogleGenAI, Type } from 'https://esm.sh/@google/genai@0.1.1';
+      import { 
+        AlertCircle, BookOpen, CheckCircle, RefreshCw, GraduationCap, Save, 
+        History as HistoryIcon, Trash2, X, AlignLeft, Sparkles, Target, 
+        PenTool, ClipboardCheck, Lightbulb, ChevronDown, ChevronUp, Book 
+      } from 'https://esm.sh/lucide-react@0.330.0';
 
-  const isBusy = appState === AppState.GENERATING_SCENARIO || appState === AppState.GENERATING_IMAGES || appState === AppState.GRADING;
+      // --- 1. CONFIG & UTILS ---
 
-  return (
-    <div className="min-h-screen py-8 px-4 font-sans text-gray-800 relative">
+      // Mock process.env for API Key compatibility
+      if (typeof process === 'undefined') {
+        window.process = { env: { API_KEY: '' } };
+      }
+
+      // App Constants
+      const AppState = {
+        IDLE: 0,
+        GENERATING_SCENARIO: 1,
+        GENERATING_IMAGES: 2,
+        READY: 3,
+        GRADING: 4
+      };
+
+      // --- 2. STORAGE SERVICE (IndexedDB) ---
       
-      {/* Main Container (Paper Style) */}
-      <main className="max-w-4xl mx-auto bg-white p-8 md:p-12 border border-gray-300 paper-shadow min-h-[800px]">
-        
-        {/* Header */}
-        <header className="border-b-2 border-gray-800 pb-6 mb-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-2xl font-bold font-serif flex items-center gap-2">
-                <GraduationCap className="h-8 w-8 text-blue-900" />
-                Part 4: Story Writing
-              </h1>
-              <p className="font-serif text-lg mt-1">
-                {scenario 
-                  ? scenario.title 
-                  : "Select a level and click 'New Comic' to start."}
-              </p>
-            </div>
+      const DB_NAME = 'StoryStripDB';
+      const STORE_NAME = 'sessions';
+      const DB_VERSION = 1;
 
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
-               {/* History Button */}
-               <button
-                onClick={openHistory}
-                disabled={isBusy}
-                className="flex items-center gap-2 text-gray-600 hover:text-blue-700 px-3 py-2 rounded hover:bg-gray-100 transition-colors"
-                title="Load saved stories"
-              >
-                <HistoryIcon className="h-5 w-5" />
-                <span className="hidden sm:inline">History</span>
-              </button>
+      function openDB() {
+        return new Promise((resolve, reject) => {
+          if (!window.indexedDB) {
+            reject(new Error("IndexedDB is not supported in this browser."));
+            return;
+          }
+          const request = indexedDB.open(DB_NAME, DB_VERSION);
+          request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            }
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      }
 
-              {/* Save Button (Only if scenario exists) */}
-              {scenario && (
-                <button
-                  onClick={handleSave}
-                  disabled={isBusy}
-                  className="flex items-center gap-2 text-gray-600 hover:text-green-700 px-3 py-2 rounded hover:bg-gray-100 transition-colors"
-                  title="Save current progress"
-                >
-                  <Save className="h-5 w-5" />
-                  <span className="hidden sm:inline">Save</span>
-                </button>
-              )}
+      const getSessions = async () => {
+        try {
+          const db = await openDB();
+          return new Promise((resolve, reject) => {
+            const transaction = db.transaction(STORE_NAME, 'readonly');
+            const store = transaction.objectStore(STORE_NAME);
+            const request = store.getAll();
+            request.onsuccess = () => {
+              const result = request.result;
+              result.sort((a, b) => b.timestamp - a.timestamp);
+              resolve(result);
+            };
+            request.onerror = () => reject(request.error);
+          });
+        } catch (e) {
+          console.error("Error getting sessions:", e);
+          return [];
+        }
+      };
 
-              {/* Difficulty Selector */}
-              <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
-                <button 
-                  onClick={() => setDifficulty('P3')}
-                  disabled={isBusy}
-                  className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${
-                    difficulty === 'P3' 
-                      ? 'bg-white text-blue-600 shadow-sm' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  P3 (30w)
-                </button>
-                <button 
-                  onClick={() => setDifficulty('P5')}
-                  disabled={isBusy}
-                  className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${
-                    difficulty === 'P5' 
-                      ? 'bg-white text-blue-600 shadow-sm' 
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  P5 (70w)
-                </button>
-              </div>
+      const saveSession = async (sessionData, existingId) => {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+          const id = existingId || Date.now().toString();
+          const newSession = {
+            ...sessionData,
+            id: id,
+            timestamp: Date.now(),
+          };
+          const request = store.put(newSession);
+          request.onsuccess = () => resolve(id);
+          request.onerror = () => reject(request.error);
+        });
+      };
 
-              <button 
-                onClick={handleGenerate}
-                disabled={isBusy}
-                className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50 transition-colors font-semibold shadow-sm"
-              >
-                {appState === AppState.GENERATING_SCENARIO || appState === AppState.GENERATING_IMAGES ? (
-                   <RefreshCw className="animate-spin h-4 w-4" />
-                ) : (
-                   <BookOpen className="h-4 w-4" />
-                )}
-                {appState === AppState.IDLE ? "Generate" : "New"}
-              </button>
-            </div>
-          </div>
+      const deleteSession = async (id) => {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const transaction = db.transaction(STORE_NAME, 'readwrite');
+          const store = transaction.objectStore(STORE_NAME);
+          const request = store.delete(id);
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error);
+        });
+      };
+
+      // --- 3. GEMINI SERVICE ---
+
+      let aiClient = null;
+
+      const getAiClient = () => {
+        if (!aiClient) {
+          // Check for key in process.env, local storage, or prompt user
+          let key = window.process.env.API_KEY;
+          if (!key) key = localStorage.getItem("GEMINI_API_KEY");
           
-          {/* Instructions */}
-          {scenario && (
-            <div className="mt-4 bg-blue-50 p-4 rounded border border-blue-100">
-              <ul className="list-disc list-inside font-serif text-sm text-gray-700 space-y-1">
-                <li>Look at the pictures and write the story in about <strong>{scenario.difficulty === 'P5' ? '70' : '30'}</strong> words.</li>
-                <li>You may use the words in the boxes to help you.</li>
-                <li>What happens in the end? Finish the story.</li>
-              </ul>
-            </div>
-          )}
-        </header>
+          if (!key) {
+            key = prompt("Please enter your Google Gemini API Key to start:");
+            if (key) {
+              window.process.env.API_KEY = key;
+              localStorage.setItem("GEMINI_API_KEY", key);
+            } else {
+              throw new Error("API Key is required to use this app.");
+            }
+          }
+          
+          aiClient = new GoogleGenAI({ apiKey: key });
+        }
+        return aiClient;
+      };
 
-        {/* Error Message */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded flex items-center gap-2">
-            <AlertCircle className="h-5 w-5" />
-            {error}
-          </div>
-        )}
+      const generateScenario = async (difficulty) => {
+        const model = "gemini-2.5-flash";
+        const levelPrompt = difficulty === 'P3' 
+          ? "Primary 3 (approx 8-9 years old). Simple, direct, everyday situations. Vocabulary level: A1/A2." 
+          : "Primary 5 (approx 10-11 years old). Slightly more complex situations allowing for descriptive writing. Vocabulary level: A2/B1.";
+        const keywordPrompt = difficulty === 'P3'
+          ? "Simple nouns or verbs (e.g., 'visit / panda')"
+          : "Phrases or slightly more advanced vocabulary (e.g., 'excited / took photos')";
 
-        {/* Loading State (Initial) */}
-        {appState === AppState.IDLE && !scenario && (
-          <div className="text-center py-20 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-            <p className="text-xl font-serif italic mb-2">Choose your level (P3 or P5)</p>
-            <p className="text-sm">Then click "Generate" to begin your practice.</p>
-          </div>
-        )}
+        const ai = getAiClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: `Create a 4-step story scenario suitable for a Hong Kong primary school English writing test (TSA style). 
+          Target Audience: ${levelPrompt}
+          The story should involve 2 characters. The plot must be linear and visual.
+          IMPORTANT: Return the response in JSON format.`,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                characters: { type: Type.ARRAY, items: { type: Type.STRING } },
+                panels: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      id: { type: Type.INTEGER },
+                      description: { type: Type.STRING },
+                      keywords: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    },
+                    required: ["id", "description", "keywords"]
+                  }
+                }
+              },
+              required: ["title", "characters", "panels"]
+            }
+          }
+        });
 
-        {/* Comics Grid */}
-        {(scenario || appState === AppState.GENERATING_SCENARIO) && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-12 max-w-3xl mx-auto my-8">
-            
-            {/* Panel 1 */}
-            <Panel 
-              id={1} 
-              imageUrl={generatedImages[0]} 
-              keywords={getPanelData(0)?.keywords || []} 
-              isLoading={!generatedImages[0]} 
-            />
+        const text = response.text;
+        if (!text) throw new Error("Failed to generate scenario");
+        const data = JSON.parse(text);
+        return { ...data, difficulty };
+      };
 
-            {/* Panel 2 */}
-            <Panel 
-              id={2} 
-              imageUrl={generatedImages[1]} 
-              keywords={getPanelData(1)?.keywords || []} 
-              isLoading={!generatedImages[1]} 
-            />
+      const generatePanelImage = async (description) => {
+        const model = "gemini-2.5-flash-image";
+        const finalPrompt = `Black and white line art, clear outlines, educational textbook illustration style, simple vector graphic, minimal background detail, no text. Scene: ${description}`;
+        const ai = getAiClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: finalPrompt
+        });
 
-            {/* Panel 3 */}
-            <Panel 
-              id={3} 
-              imageUrl={generatedImages[2]} 
-              keywords={getPanelData(2)?.keywords || []} 
-              isLoading={!generatedImages[2]} 
-            />
+        const candidates = response.candidates;
+        if (!candidates || candidates.length === 0) throw new Error("No image generated");
 
-            {/* Panel 4 (The Ending) */}
-            <div className="relative group">
-               {/* Toggle for Teacher/Student View */}
-               {generatedImages[3] && (
-                  <button 
-                    onClick={() => setShowMysteryEnding(!showMysteryEnding)}
-                    className="absolute -top-8 right-0 text-xs text-blue-500 underline hover:text-blue-700"
-                  >
-                    {showMysteryEnding ? "Show Answer" : "Hide Answer"}
-                  </button>
-               )}
-               
-               <Panel 
-                id={4} 
-                imageUrl={showMysteryEnding ? undefined : generatedImages[3]} 
-                keywords={showMysteryEnding ? [] : (getPanelData(3)?.keywords || [])}
-                isLoading={!generatedImages[3]}
-                isQuestionMark={showMysteryEnding}
-              />
-            </div>
+        for (const part of candidates[0].content.parts) {
+          if (part.inlineData && part.inlineData.data) {
+             return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          }
+        }
+        throw new Error("Image data not found");
+      };
 
-          </div>
-        )}
+      const gradeStory = async (story, scenario) => {
+        const model = "gemini-2.5-flash";
+        const isP5 = scenario.difficulty === 'P5';
+        const contentRubric = isP5
+          ? `Content (0-4 marks): 4: Interesting/relevant details, creative ending. 3: Clear story, reasonable ending. 2: Brief/limited details. 1: Disjointed. 0: Irrelevant.`
+          : `Content (0-3 marks): 3: Clear description, reasonable ending. 2: Brief description. 1: Unclear/missing ending. 0: Irrelevant.`;
+        const languageRubric = `Language (0-3 marks): 3: Good vocabulary/sentences, few errors. 2: Adequate vocabulary, some errors. 1: Limited vocabulary, many errors. 0: Unintelligible.`;
+        const wordCountReq = isP5 ? "approx 70 words" : "approx 30 words";
 
-        {/* Writing Section */}
-        {scenario && appState === AppState.READY && (
-           <>
-             <WritingArea 
-               value={studentText} 
-               onChange={setStudentText} 
-               disabled={false} 
-               onSubmit={handleGrade}
-               isGrading={false}
-               difficulty={scenario.difficulty}
-             />
-           </>
-        )}
-        
-        {/* Grading State */}
-        {appState === AppState.GRADING && (
-          <div className="mt-8 text-center text-gray-500 font-serif italic animate-pulse">
-            Teacher is marking your work...
-          </div>
-        )}
+        const prompt = `
+          You are grading a ${scenario.difficulty} student's writing based on TSA rubric.
+          Context: ${scenario.title}
+          Plot: ${scenario.panels.map(p => `${p.id}. ${p.description}`).join(' ')}
+          Student Story: "${story}"
+          Rubrics: ${contentRubric} ${languageRubric}
+          Reqs: ${wordCountReq}, past tense, logical ending.
+          Return JSON.
+        `;
 
-        {/* Feedback Display */}
-        {feedback && (
-          <div className="mt-10 border-t-2 border-gray-200 pt-8 bg-yellow-50 p-6 rounded-lg border border-yellow-200 shadow-sm animate-fadeIn">
-             {/* Header & Score */}
-             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-               <div className="flex items-center gap-3">
-                 <div className="bg-green-100 p-2 rounded-full text-green-700">
-                   <CheckCircle className="h-6 w-6" />
-                 </div>
-                 <h2 className="text-2xl font-serif font-bold text-gray-800">Assessment Report</h2>
-               </div>
-               
-               {/* Score Badge */}
-               <div className="flex items-center gap-4 bg-white px-6 py-3 rounded-lg shadow-sm border border-yellow-100">
-                 <div className="text-center border-r border-gray-200 pr-4">
-                    <span className="block text-xs font-bold text-gray-400 uppercase">Content</span>
-                    <span className="text-xl font-bold text-gray-800">
-                      {feedback.contentScore ?? '?'}/{feedback.maxScore === 7 ? 4 : 3}
-                    </span>
-                 </div>
-                 <div className="text-center border-r border-gray-200 pr-4">
-                    <span className="block text-xs font-bold text-gray-400 uppercase">Language</span>
-                    <span className="text-xl font-bold text-gray-800">{feedback.languageScore ?? '?'}/3</span>
-                 </div>
-                 <div className="text-center pl-2">
-                    <span className="block text-xs font-bold text-green-600 uppercase">Total</span>
-                    <span className="text-3xl font-bold text-green-700">{feedback.score}/{feedback.maxScore}</span>
-                 </div>
-               </div>
-             </div>
-             
-             {/* Encouragement */}
-             <div className="mb-6">
-                <p className="text-lg text-gray-800 italic border-l-4 border-green-500 pl-4 py-2 bg-white rounded shadow-sm">
-                  "{feedback.encouragement}"
-                </p>
-             </div>
+        const ai = getAiClient();
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                score: { type: Type.INTEGER },
+                maxScore: { type: Type.INTEGER },
+                contentScore: { type: Type.INTEGER },
+                languageScore: { type: Type.INTEGER },
+                grammarCorrections: { type: Type.ARRAY, items: { type: Type.STRING } },
+                relevance: { type: Type.STRING },
+                sentenceStructure: { type: Type.STRING },
+                vocabularyUsage: { type: Type.STRING },
+                creativity: { type: Type.STRING },
+                encouragement: { type: Type.STRING }
+              },
+              required: ["score", "maxScore", "contentScore", "languageScore", "grammarCorrections", "relevance", "sentenceStructure", "vocabularyUsage", "creativity", "encouragement"]
+            }
+          }
+        });
 
-             <div className="grid md:grid-cols-2 gap-6">
-                {/* Left Col: Core Corrections */}
-                <div className="space-y-4">
-                   <div className="bg-white p-5 rounded-lg border border-red-100 shadow-sm">
-                      <h3 className="font-bold text-red-700 uppercase text-xs tracking-wider mb-3 flex items-center gap-2">
-                        <PenTool className="h-4 w-4"/> Grammar & Language
-                      </h3>
-                      {feedback.grammarCorrections.length > 0 ? (
-                        <ul className="list-disc list-inside text-sm text-gray-700 space-y-2">
-                          {feedback.grammarCorrections.map((c, i) => <li key={i} className="leading-relaxed">{c}</li>)}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-green-600 font-medium flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4"/> No major grammar errors found.
-                        </p>
-                      )}
-                      
-                      {/* Language Rubric Comment */}
-                      <div className="mt-4 pt-4 border-t border-red-50">
-                        <p className="text-xs text-gray-500 uppercase font-bold mb-1">Structural Feedback</p>
-                        <p className="text-sm text-gray-700">{feedback.sentenceStructure}</p>
-                      </div>
-                   </div>
+        const text = response.text;
+        if (!text) throw new Error("Failed to generate grading");
+        return JSON.parse(text);
+      };
+
+      // --- 4. COMPONENTS ---
+
+      const Panel = ({ id, imageUrl, keywords, isLoading, isQuestionMark }) => {
+        return (
+          <div className="flex flex-col items-center w-full">
+            <div className="w-full aspect-square border-2 border-black bg-white relative overflow-hidden">
+              <div className="absolute top-1 left-2 font-bold text-sm font-serif text-gray-500 select-none">
+                Picture {id}
+              </div>
+              {isLoading ? (
+                <div className="w-full h-full flex items-center justify-center bg-gray-100 animate-pulse">
+                  <span className="text-gray-400 font-serif">Drawing...</span>
                 </div>
-
-                {/* Right Col: Content & Style */}
-                <div className="space-y-4">
-                   {/* Content / Relevance */}
-                   <div className="bg-white p-5 rounded-lg border border-blue-100 shadow-sm">
-                      <h3 className="font-bold text-blue-700 uppercase text-xs tracking-wider mb-3 flex items-center gap-2">
-                        <ClipboardCheck className="h-4 w-4"/> Content & Relevance
-                      </h3>
-                      <p className="text-sm text-gray-700 leading-relaxed">{feedback.relevance}</p>
-                      
-                      <div className="mt-3 pt-3 border-t border-blue-50">
-                         <h4 className="text-xs font-bold text-purple-600 uppercase mb-1 flex items-center gap-1">
-                           <Sparkles className="h-3 w-3"/> Creativity
-                         </h4>
-                         <p className="text-sm text-gray-600">{feedback.creativity}</p>
-                      </div>
-                   </div>
-
-                   {/* Vocabulary */}
-                   <div className="bg-white p-5 rounded-lg border border-orange-100 shadow-sm">
-                      <h3 className="font-bold text-orange-700 uppercase text-xs tracking-wider mb-3 flex items-center gap-2">
-                        <BookOpen className="h-4 w-4"/> Vocabulary
-                      </h3>
-                      <p className="text-sm text-gray-700">{feedback.vocabularyUsage}</p>
-                   </div>
+              ) : isQuestionMark ? (
+                <div className="w-full h-full flex items-center justify-center">
+                  <span className="text-[150px] font-bold font-sans leading-none">?</span>
                 </div>
-             </div>
-          </div>
-        )}
-
-      </main>
-
-      <footer className="max-w-4xl mx-auto mt-8 text-center text-gray-400 text-sm">
-        <p>Powered by Google Gemini 2.5 Flash & Flash Image</p>
-      </footer>
-
-      {/* History Modal */}
-      {showHistory && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl flex flex-col max-h-[80vh]">
-            <div className="p-4 border-b flex justify-between items-center">
-              <h2 className="text-xl font-bold font-serif flex items-center gap-2">
-                <HistoryIcon className="text-blue-600"/> Saved Stories
-              </h2>
-              <button onClick={() => setShowHistory(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-            
-            <div className="overflow-y-auto p-4 space-y-3 flex-1">
-              {savedSessions.length === 0 ? (
-                <p className="text-center text-gray-500 py-8 italic">No saved stories found.</p>
+              ) : imageUrl ? (
+                <img src={imageUrl} alt={`Panel ${id}`} className="w-full h-full object-contain p-2 grayscale" />
               ) : (
-                savedSessions.map((session) => (
-                  <div key={session.id} className="border rounded-lg p-3 hover:bg-gray-50 transition-colors flex gap-4">
-                    {/* Thumbnail */}
-                    <div className="w-20 h-20 bg-gray-200 rounded overflow-hidden flex-shrink-0 border">
-                      {session.generatedImages[0] ? (
-                        <img src={session.generatedImages[0]} alt="Thumbnail" className="w-full h-full object-cover grayscale" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">No img</div>
-                      )}
-                    </div>
-                    
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start">
-                        <h3 className="font-bold text-sm truncate pr-2">{session.scenario.title}</h3>
-                        <span className="text-xs font-mono bg-gray-200 px-1.5 py-0.5 rounded text-gray-600">
-                          {session.difficulty}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {new Date(session.timestamp).toLocaleDateString()} at {new Date(session.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1 truncate">
-                        {session.studentText ? `"${session.studentText.substring(0, 30)}..."` : "No writing yet"}
-                      </p>
-                      {session.feedback && (
-                         <span className="text-xs text-green-600 font-bold block mt-1">
-                           Score: {session.feedback.score}/{session.feedback.maxScore || (session.difficulty === 'P5' ? 7 : 6)}
-                         </span>
-                      )}
-                    </div>
+                <div className="w-full h-full flex items-center justify-center bg-gray-50">
+                  <span className="text-gray-300">Image unavailable</span>
+                </div>
+              )}
+            </div>
+            {!isQuestionMark && (
+              <div className="mt-2 border border-black px-4 py-1 bg-white min-w-[120px] text-center">
+                <span className="font-serif text-lg">
+                  {keywords && keywords.length > 0 ? keywords.join(' / ') : '...'}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      };
 
-                    {/* Actions */}
-                    <div className="flex flex-col justify-between items-end">
-                       <button 
-                        onClick={() => loadSession(session)}
-                        className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                       >
-                         Load
-                       </button>
-                       <button 
-                        onClick={() => deleteSession(session.id)}
-                        className="text-gray-400 hover:text-red-500 p-1"
-                       >
-                         <Trash2 className="h-4 w-4" />
-                       </button>
+      const WritingArea = ({ value, onChange, disabled, onSubmit, isGrading, difficulty }) => {
+        const [showTips, setShowTips] = useState(true);
+        const wordCount = value.trim().split(/\s+/).filter(w => w.length > 0).length;
+        const targetWords = difficulty === 'P5' ? 70 : 30;
+        const minWords = difficulty === 'P5' ? 15 : 5;
+
+        const renderTips = () => {
+          const isP3 = difficulty === 'P3';
+          const title = isP3 ? "P3 Writing Tips (Level 1)" : "P5 Writing Tips (Level 2)";
+          const Icon = isP3 ? Lightbulb : PenTool;
+          const vocabList = isP3 
+            ? ["went", "saw", "played", "ate", "happy", "fun", "sunny", "first", "then", "finally"]
+            : ["immediately", "suddenly", "thrilled", "disappointed", "memorable", "although", "because", "however", "fortunately"];
+
+          return (
+            <div className={`mt-6 rounded-lg border transition-all duration-300 overflow-hidden ${
+              isP3 ? 'bg-orange-50 border-orange-200 text-orange-900' : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+            }`}>
+              <button 
+                onClick={() => setShowTips(!showTips)}
+                className={`w-full flex items-center justify-between p-4 font-bold font-serif ${
+                  isP3 ? 'text-orange-800 hover:bg-orange-100' : 'text-indigo-800 hover:bg-indigo-100'
+                } transition-colors`}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className="h-5 w-5" />
+                  {title}
+                </div>
+                {showTips ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+
+              {showTips && (
+                <div className="px-4 pb-4 animate-fadeIn">
+                  <div className="grid md:grid-cols-2 gap-6 text-sm font-serif">
+                    <div className="space-y-3">
+                      <h4 className="font-bold opacity-80 uppercase text-xs tracking-wide">Guidelines</h4>
+                      <ul className="list-disc list-inside space-y-1 opacity-90">
+                        {isP3 ? (
+                          <>
+                            <li>Use <strong>Past Tense</strong> (e.g., <em>went, saw</em>).</li>
+                            <li>Use time words: <em>First, Then, Next, At last</em>.</li>
+                            <li>Structure: <em>Subject + Verb + Object</em>.</li>
+                          </>
+                        ) : (
+                          <>
+                            <li>Use <strong>adjectives</strong> & <strong>adverbs</strong>.</li>
+                            <li>Use connectors: <em>because, so, although</em>.</li>
+                            <li>Describe <strong>feelings</strong> and reactions.</li>
+                          </>
+                        )}
+                      </ul>
+                      <div className="bg-white/60 p-3 rounded border border-current opacity-80 italic text-xs leading-relaxed">
+                        <strong className="not-italic block mb-1 opacity-100">Example:</strong>
+                        {isP3 
+                          ? '"Yesterday, Tom went to the zoo. He saw a cute panda. He was very happy."'
+                          : '"Last Sunday, Tom visited the zoo excitedly. Suddenly, he saw a giant panda. He took a photo because it was cute."'
+                        }
+                      </div>
+                    </div>
+                    <div>
+                       <h4 className="font-bold opacity-80 uppercase text-xs tracking-wide mb-2 flex items-center gap-1">
+                         <Book className="h-3 w-3" /> Vocabulary Bank
+                       </h4>
+                       <div className="flex flex-wrap gap-2">
+                         {vocabList.map((word, idx) => (
+                           <span key={idx} className={`px-2 py-1 rounded text-xs font-medium bg-white/70 border ${isP3 ? 'border-orange-200' : 'border-indigo-200'}`}>
+                             {word}
+                           </span>
+                         ))}
+                       </div>
                     </div>
                   </div>
-                ))
+                </div>
               )}
             </div>
-            
-            <div className="p-3 bg-gray-50 border-t text-center text-xs text-gray-400">
-              Saved locally in your browser. Large images supported via IndexedDB.
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+          );
+        };
 
-export default App;
+        return (
+          <div className="mt-8 w-full max-w-2xl mx-auto">
+            <label className="block font-bold font-serif text-lg mb-2">
+              Write the story in about <span className="text-blue-600">{targetWords} words</span>:
+            </label>
+            <div className="relative">
+              <textarea
+                className="w-full h-48 p-4 border-2 border-black font-serif text-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white leading-8"
+                style={{ backgroundImage: 'linear-gradient(transparent, transparent 31px, #e5e7eb 31px)', backgroundSize: '100% 32px', lineHeight: '32px' }}
+                placeholder={difficulty === 'P3' ? "One day, Tom..." : "Last weekend, the sun was shining..."}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                disabled={disabled}
+              />
+              <div className="absolute bottom-2 right-2 text-xs text-gray-500 bg-white px-1 border border-gray-200 rounded">
+                Words: {wordCount} / ~{targetWords}
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={onSubmit}
+                disabled={disabled || wordCount < minWords || isGrading}
+                className={`px-6 py-2 font-bold text-white rounded shadow-md transition-colors flex items-center gap-2
+                  ${disabled || wordCount < minWords ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+              >
+                {isGrading ? 'Checking...' : 'Submit for Marking'}
+              </button>
+            </div>
+            {renderTips()}
+          </div>
+        );
+      };
+
+      // --- 5. MAIN APP COMPONENT ---
+
+      const App = () => {
+        const [appState, setAppState] = useState(AppState.IDLE);
+        const [difficulty, setDifficulty] = useState('P3');
+        const [scenario, setScenario] = useState(null);
+        const [generatedImages, setGeneratedImages] = useState([]);
+        const [studentText, setStudentText] = useState('');
+        const [feedback, setFeedback] = useState(null);
+        const [showMysteryEnding, setShowMysteryEnding] = useState(true);
+        const [error, setError] = useState(null);
+        
+        const [currentSessionId, setCurrentSessionId] = useState(null);
+        const [showHistory, setShowHistory] = useState(false);
+        const [savedSessions, setSavedSessions] = useState([]);
+
+        const handleGenerate = useCallback(async () => {
+          try {
+            setAppState(AppState.GENERATING_SCENARIO);
+            setError(null);
+            setScenario(null);
+            setGeneratedImages([]);
+            setStudentText('');
+            setFeedback(null);
+            setCurrentSessionId(null);
+
+            const newScenario = await generateScenario(difficulty);
+            setScenario(newScenario);
+
+            setAppState(AppState.GENERATING_IMAGES);
+            const imagePromises = newScenario.panels.map((panel) => 
+              generatePanelImage(panel.description)
+            );
+
+            const images = await Promise.all(imagePromises);
+            setGeneratedImages(images);
+            setAppState(AppState.READY);
+          } catch (err) {
+            console.error(err);
+            setError(err.message || "Something went wrong generating the comic.");
+            setAppState(AppState.IDLE);
+          }
+        }, [difficulty]);
+
+        const handleGrade = useCallback(async () => {
+          if (!scenario) return;
+          try {
+            setAppState(AppState.GRADING);
+            const result = await gradeStory(studentText, scenario);
+            setFeedback(result);
+            setAppState(AppState.READY);
+          } catch (err) {
+            setError("Failed to grade the story. Please try again.");
+            setAppState(AppState.READY);
+          }
+        }, [studentText, scenario]);
+
+        const handleSave = async () => {
+          if (!scenario) return;
+          try {
+            const savedId = await saveSession({
+              scenario,
+              generatedImages,
+              studentText,
+              feedback,
+              difficulty
+            }, currentSessionId || undefined);
+            setCurrentSessionId(savedId);
+            alert("Story saved to history!");
+          } catch (e) {
+            console.error(e);
+            alert("Failed to save story. Please try again.");
+          }
+        };
+
+        const openHistory = async () => {
+          try {
+            const sessions = await getSessions();
+            setSavedSessions(sessions);
+            setShowHistory(true);
+          } catch (e) {
+            console.error(e);
+            alert("Failed to load history.");
+          }
+        };
+
+        const loadSession = (session) => {
+          setScenario(session.scenario);
+          setGeneratedImages(session.generatedImages);
+          setStudentText(session.studentText);
+          setFeedback(session.feedback);
+          setDifficulty(session.difficulty);
+          setCurrentSessionId(session.id);
+          setAppState(AppState.READY);
+          setShowHistory(false);
+          setShowMysteryEnding(true);
+        };
+
+        const deleteSessionHandler = async (id) => {
+          try {
+            await deleteSession(id);
+            setSavedSessions(prev => prev.filter(s => s.id !== id));
+            if (id === currentSessionId) setCurrentSessionId(null);
+          } catch (e) {
+            console.error(e);
+            alert("Failed to delete story.");
+          }
+        };
+
+        const isBusy = appState === AppState.GENERATING_SCENARIO || appState === AppState.GENERATING_IMAGES || appState === AppState.GRADING;
+
+        return (
+          <div className="min-h-screen py-8 px-4 font-sans text-gray-800 relative">
+            <main className="max-w-4xl mx-auto bg-white p-8 md:p-12 border border-gray-300 paper-shadow min-h-[800px]">
+              
+              <header className="border-b-2 border-gray-800 pb-6 mb-8">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div>
+                    <h1 className="text-2xl font-bold font-serif flex items-center gap-2">
+                      <GraduationCap className="h-8 w-8 text-blue-900" />
+                      Part 4: Story Writing
+                    </h1>
+                    <p className="font-serif text-lg mt-1">
+                      {scenario ? scenario.title : "Select a level and click 'New Comic' to start."}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
+                    <button onClick={openHistory} disabled={isBusy} className="flex items-center gap-2 text-gray-600 hover:text-blue-700 px-3 py-2 rounded hover:bg-gray-100 transition-colors">
+                      <HistoryIcon className="h-5 w-5" />
+                      <span className="hidden sm:inline">History</span>
+                    </button>
+                    {scenario && (
+                      <button onClick={handleSave} disabled={isBusy} className="flex items-center gap-2 text-gray-600 hover:text-green-700 px-3 py-2 rounded hover:bg-gray-100 transition-colors">
+                        <Save className="h-5 w-5" />
+                        <span className="hidden sm:inline">Save</span>
+                      </button>
+                    )}
+                    <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200">
+                      <button onClick={() => setDifficulty('P3')} disabled={isBusy} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${difficulty === 'P3' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>P3 (30w)</button>
+                      <button onClick={() => setDifficulty('P5')} disabled={isBusy} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${difficulty === 'P5' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>P5 (70w)</button>
+                    </div>
+                    <button onClick={handleGenerate} disabled={isBusy} className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 disabled:opacity-50 transition-colors font-semibold shadow-sm">
+                      {appState === AppState.GENERATING_SCENARIO || appState === AppState.GENERATING_IMAGES ? <RefreshCw className="animate-spin h-4 w-4" /> : <BookOpen className="h-4 w-4" />}
+                      {appState === AppState.IDLE ? "Generate" : "New"}
+                    </button>
+                  </div>
+                </div>
+                
+                {scenario && (
+                  <div className="mt-4 bg-blue-50 p-4 rounded border border-blue-100">
+                    <ul className="list-disc list-inside font-serif text-sm text-gray-700 space-y-1">
+                      <li>Look at the pictures and write the story in about <strong>{scenario.difficulty === 'P5' ? '70' : '30'}</strong> words.</li>
+                      <li>You may use the words in the boxes to help you.</li>
+                      <li>What happens in the end? Finish the story.</li>
+                    </ul>
+                  </div>
+                )}
+              </header>
+
+              {error && (
+                <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-600 rounded flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5" />
+                  {error}
+                </div>
+              )}
+
+              {appState === AppState.IDLE && !scenario && (
+                <div className="text-center py-20 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                  <p className="text-xl font-serif italic mb-2">Choose your level (P3 or P5)</p>
+                  <p className="text-sm">Then click "Generate" to begin your practice.</p>
+                </div>
+              )}
+
+              {(scenario || appState === AppState.GENERATING_SCENARIO) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-12 max-w-3xl mx-auto my-8">
+                  <Panel id={1} imageUrl={generatedImages[0]} keywords={scenario?.panels[0]?.keywords || []} isLoading={!generatedImages[0]} />
+                  <Panel id={2} imageUrl={generatedImages[1]} keywords={scenario?.panels[1]?.keywords || []} isLoading={!generatedImages[1]} />
+                  <Panel id={3} imageUrl={generatedImages[2]} keywords={scenario?.panels[2]?.keywords || []} isLoading={!generatedImages[2]} />
+                  <div className="relative group">
+                     {generatedImages[3] && (
+                        <button onClick={() => setShowMysteryEnding(!showMysteryEnding)} className="absolute -top-8 right-0 text-xs text-blue-500 underline hover:text-blue-700">
+                          {showMysteryEnding ? "Show Answer" : "Hide Answer"}
+                        </button>
+                     )}
+                     <Panel id={4} imageUrl={showMysteryEnding ? undefined : generatedImages[3]} keywords={showMysteryEnding ? [] : (scenario?.panels[3]?.keywords || [])} isLoading={!generatedImages[3]} isQuestionMark={showMysteryEnding} />
+                  </div>
+                </div>
+              )}
+
+              {scenario && appState === AppState.READY && (
+                 <WritingArea value={studentText} onChange={setStudentText} disabled={false} onSubmit={handleGrade} isGrading={false} difficulty={scenario.difficulty} />
+              )}
+              
+              {appState === AppState.GRADING && (
+                <div className="mt-8 text-center text-gray-500 font-serif italic animate-pulse">Teacher is marking your work...</div>
+              )}
+
+              {feedback && (
+                <div className="mt-10 border-t-2 border-gray-200 pt-8 bg-yellow-50 p-6 rounded-lg border border-yellow-200 shadow-sm animate-fadeIn">
+                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                     <div className="flex items-center gap-3">
+                       <div className="bg-green-100 p-2 rounded-full text-green-700"><CheckCircle className="h-6 w-6" /></div>
+                       <h2 className="text-2xl font-serif font-bold text-gray-800">Assessment Report</h2>
+                     </div>
+                     <div className="flex items-center gap-4 bg-white px-6 py-3 rounded-lg shadow-sm border border-yellow-100">
+                       <div className="text-center border-r border-gray-200 pr-4">
+                          <span className="block text-xs font-bold text-gray-400 uppercase">Content</span>
+                          <span className="text-xl font-bold text-gray-800">{feedback.contentScore ?? '?'}/{feedback.maxScore === 7 ? 4 : 3}</span>
+                       </div>
+                       <div className="text-center border-r border-gray-200 pr-4">
+                          <span className="block text-xs font-bold text-gray-400 uppercase">Language</span>
+                          <span className="text-xl font-bold text-gray-800">{feedback.languageScore ?? '?'}/3</span>
+                       </div>
+                       <div className="text-center pl-2">
+                          <span className="block text-xs font-bold text-green-600 uppercase">Total</span>
+                          <span className="text-3xl font-bold text-green-700">{feedback.score}/{feedback.maxScore}</span>
+                       </div>
+                     </div>
+                   </div>
+                   <div className="mb-6">
+                      <p className="text-lg text-gray-800 italic border-l-4 border-green-500 pl-4 py-2 bg-white rounded shadow-sm">"{feedback.encouragement}"</p>
+                   </div>
+                   <div className="grid md:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                         <div className="bg-white p-5 rounded-lg border border-red-100 shadow-sm">
+                            <h3 className="font-bold text-red-700 uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><PenTool className="h-4 w-4"/> Grammar & Language</h3>
+                            {feedback.grammarCorrections.length > 0 ? (
+                              <ul className="list-disc list-inside text-sm text-gray-700 space-y-2">
+                                {feedback.grammarCorrections.map((c, i) => <li key={i} className="leading-relaxed">{c}</li>)}
+                              </ul>
+                            ) : (
+                              <p className="text-sm text-green-600 font-medium flex items-center gap-2"><CheckCircle className="h-4 w-4"/> No major grammar errors found.</p>
+                            )}
+                            <div className="mt-4 pt-4 border-t border-red-50">
+                              <p className="text-xs text-gray-500 uppercase font-bold mb-1">Structural Feedback</p>
+                              <p className="text-sm text-gray-700">{feedback.sentenceStructure}</p>
+                            </div>
+                         </div>
+                      </div>
+                      <div className="space-y-4">
+                         <div className="bg-white p-5 rounded-lg border border-blue-100 shadow-sm">
+                            <h3 className="font-bold text-blue-700 uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><ClipboardCheck className="h-4 w-4"/> Content & Relevance</h3>
+                            <p className="text-sm text-gray-700 leading-relaxed">{feedback.relevance}</p>
+                            <div className="mt-3 pt-3 border-t border-blue-50">
+                               <h4 className="text-xs font-bold text-purple-600 uppercase mb-1 flex items-center gap-1"><Sparkles className="h-3 w-3"/> Creativity</h4>
+                               <p className="text-sm text-gray-600">{feedback.creativity}</p>
+                            </div>
+                         </div>
+                         <div className="bg-white p-5 rounded-lg border border-orange-100 shadow-sm">
+                            <h3 className="font-bold text-orange-700 uppercase text-xs tracking-wider mb-3 flex items-center gap-2"><BookOpen className="h-4 w-4"/> Vocabulary</h3>
+                            <p className="text-sm text-gray-700">{feedback.vocabularyUsage}</p>
+                         </div>
+                      </div>
+                   </div>
+                </div>
+              )}
+            </main>
+            <footer className="max-w-4xl mx-auto mt-8 text-center text-gray-400 text-sm">
+              <p>Powered by Google Gemini 2.5 Flash & Flash Image</p>
+            </footer>
+            {showHistory && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl flex flex-col max-h-[80vh]">
+                  <div className="p-4 border-b flex justify-between items-center">
+                    <h2 className="text-xl font-bold font-serif flex items-center gap-2"><HistoryIcon className="text-blue-600"/> Saved Stories</h2>
+                    <button onClick={() => setShowHistory(false)} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
+                  </div>
+                  <div className="overflow-y-auto p-4 space-y-3 flex-1">
+                    {savedSessions.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8 italic">No saved stories found.</p>
+                    ) : (
+                      savedSessions.map((session) => (
+                        <div key={session.id} className="border rounded-lg p-3 hover:bg-gray-50 transition-colors flex gap-4">
+                          <div className="w-20 h-20 bg-gray-200 rounded overflow-hidden flex-shrink-0 border">
+                            {session.generatedImages[0] ? (
+                              <img src={session.generatedImages[0]} alt="Thumbnail" className="w-full h-full object-cover grayscale" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-xs text-gray-400">No img</div>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-start">
+                              <h3 className="font-bold text-sm truncate pr-2">{session.scenario.title}</h3>
+                              <span className="text-xs font-mono bg-gray-200 px-1.5 py-0.5 rounded text-gray-600">{session.difficulty}</span>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">{new Date(session.timestamp).toLocaleDateString()} {new Date(session.timestamp).toLocaleTimeString()}</p>
+                            <p className="text-xs text-gray-400 mt-1 truncate">{session.studentText ? `"${session.studentText.substring(0, 30)}..."` : "No writing yet"}</p>
+                            {session.feedback && <span className="text-xs text-green-600 font-bold block mt-1">Score: {session.feedback.score}/{session.feedback.maxScore}</span>}
+                          </div>
+                          <div className="flex flex-col justify-between items-end">
+                             <button onClick={() => loadSession(session)} className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">Load</button>
+                             <button onClick={() => deleteSessionHandler(session.id)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 className="h-4 w-4" /></button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
