@@ -25,36 +25,36 @@
         animation: fadeIn 0.5s ease-out forwards;
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
-  }
-}
-</script>
+    <!-- Import Map for React & Libraries -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@19.0.0",
+        "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+        "@google/genai": "https://esm.sh/@google/genai@0.1.1",
+        "lucide-react": "https://esm.sh/lucide-react@0.330.0"
+      }
+    }
+    </script>
 </head>
   <body>
     <div id="root"></div>
 
     <!-- Main Application Script -->
     <script type="text/babel" data-type="module">
-      import React, { useState, useCallback, useEffect } from 'https://esm.sh/react@19.0.0';
-      import ReactDOM from 'https://esm.sh/react-dom@19.0.0/client';
-      import { GoogleGenAI, Type } from 'https://esm.sh/@google/genai@0.1.1';
+      import React, { useState, useCallback, useEffect } from 'react';
+      import { createRoot } from 'react-dom/client';
+      import { GoogleGenAI, Type } from '@google/genai';
       import { 
         AlertCircle, BookOpen, CheckCircle, RefreshCw, GraduationCap, Save, 
         History as HistoryIcon, Trash2, X, AlignLeft, Sparkles, Target, 
         PenTool, ClipboardCheck, Lightbulb, ChevronDown, ChevronUp, Book 
-      } from 'https://esm.sh/lucide-react@0.330.0';
+      } from 'lucide-react';
 
       // --- 1. CONFIG & UTILS ---
 
-      // Mock process.env for API Key compatibility
-      if (typeof process === 'undefined') {
+      // Mock process.env for API Key compatibility in browser
+      if (typeof window.process === 'undefined') {
         window.process = { env: { API_KEY: '' } };
       }
 
@@ -732,7 +732,7 @@
         );
       };
 
-      const root = ReactDOM.createRoot(document.getElementById('root'));
+      const root = createRoot(document.getElementById('root'));
       root.render(<App />);
     </script>
   </body>
